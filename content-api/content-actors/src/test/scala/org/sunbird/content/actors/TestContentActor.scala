@@ -10,7 +10,7 @@ import org.sunbird.common.JsonUtils
 import org.sunbird.common.dto.Request
 import org.sunbird.common.exception.ResponseCode
 import org.sunbird.graph.{GraphService, OntologyEngineContext}
-
+import java.util.HashMap
 import scala.collection.JavaConversions._
 import scala.concurrent.Future
 import scala.concurrent.ExecutionContext.Implicits.global
@@ -128,5 +128,24 @@ class TestContentActor extends BaseSpec with MockFactory {
         })
         node
     }
-
+    it should "return success response for retireContent" in {
+        implicit val ss = mock[StorageService]
+        implicit val oec: OntologyEngineContext = mock[OntologyEngineContext]
+        val graphDB = mock[GraphService]
+        (oec.graphService _).expects().returns(graphDB).anyNumberOfTimes()
+        val nodeGetIdentifier = new util.HashMap[String, AnyRef]() {
+            {
+                put("identifier", "0123")
+            }
+        }
+        val Node = getNode("Content", Option(nodeGetIdentifier))
+        (graphDB.getNodeByUniqueId(_: String, _: String, _: Boolean, _: Request)).expects(*, *, *, *).returns(Future(Node)).anyNumberOfTimes()
+        (graphDB.updateNodes(_: String, _: List[String], _: HashMap[String, AnyRef])).expects(*, *, *).returns(Future(new util.HashMap[String, Node])).anyNumberOfTimes()
+        val request = getContentRequest()
+        request.getContext.put("identifier", "domain")
+        request.getRequest.putAll(mapAsJavaMap(Map("identifier" -> "domain")))
+        request.setOperation("retireContent")
+        val response = callActor(request, Props(new ContentActor()))
+        assert("successful".equals(response.getParams.getStatus))
+    }
 }
