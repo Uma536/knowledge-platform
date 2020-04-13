@@ -133,12 +133,12 @@ class TestContentActor extends BaseSpec with MockFactory {
         implicit val oec: OntologyEngineContext = mock[OntologyEngineContext]
         val graphDB = mock[GraphService]
         (oec.graphService _).expects().returns(graphDB).anyNumberOfTimes()
-        val nodeGetIdentifier = new util.HashMap[String, AnyRef]() {
+        val nodeIdentifier = new util.HashMap[String, AnyRef]() {
             {
                 put("identifier", "0123")
             }
         }
-        val Node = getNode("Content", Option(nodeGetIdentifier))
+        val Node = getNode("Content", Option(nodeIdentifier))
         (graphDB.getNodeByUniqueId(_: String, _: String, _: Boolean, _: Request)).expects(*, *, *, *).returns(Future(Node)).anyNumberOfTimes()
         (graphDB.updateNodes(_: String, _: List[String], _: HashMap[String, AnyRef])).expects(*, *, *).returns(Future(new util.HashMap[String, Node])).anyNumberOfTimes()
         val request = getContentRequest()
