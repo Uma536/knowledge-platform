@@ -3,6 +3,9 @@
         "create" : [
             "status", "dialcodes"
         ],
+        "copy" : [
+            "status"
+        ],
         "update": []
     },
     "objectType": "Content",
@@ -57,6 +60,11 @@
             "type": "associatedTo",
             "direction": "out",
             "objects": ["Content"]
+        },
+        "itemSets": {
+            "type": "associatedTo",
+            "direction": "out",
+            "objects": ["ItemSet"]
         }
     },
     "version": "enable",
@@ -67,5 +75,16 @@
             "license": "License"
         }
     },
-    "cacheEnabled": true
+    "cacheEnabled": true,
+    "searchProps": {
+        "status": ["Live"],
+        "softConstraints": {
+            "medium": 15,
+            "subject": 15,
+            "ageGroup": 1,
+            "gradeLevel": 7,
+            "board": 4,
+            "relatedBoards": 4
+        }
+    }
 }

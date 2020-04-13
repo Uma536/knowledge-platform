@@ -14,6 +14,7 @@ import org.sunbird.common.exception.{ErrorCodes, ResponseCode, ServerException}
 import org.sunbird.telemetry.logger.TelemetryManager
 
 import scala.collection.JavaConverters._
+import scala.collection.JavaConversions._
 import scala.concurrent.{ExecutionContext, Future, Promise}
 
 class ExternalStore(keySpace: String , table: String , primaryKey: java.util.List[String]) extends CassandraStore(keySpace, table, primaryKey) {
@@ -83,6 +84,23 @@ class ExternalStore(keySpace: String , table: String , primaryKey: java.util.Lis
             case e: Exception =>
                 e.printStackTrace()
                 TelemetryManager.error("Exception Occurred While Reading The Record. | Exception is : " + e.getMessage, e)
+                throw new ServerException(ErrorCodes.ERR_SYSTEM_EXCEPTION.name, "Exception Occurred While Reading The Record. Exception is : " + e.getMessage)
+        }
+    }
+
+    def delete(identifiers: List[String])(implicit ec: ExecutionContext): Future[Response] = {
+        val delete = QueryBuilder.delete()
+        val deleteQuery = delete.from(keySpace, table).where(QueryBuilder.in(primaryKey.get(0), seqAsJavaList(identifiers)))
+        try {
+            val session: Session = CassandraConnector.getSession
+            session.executeAsync(deleteQuery).asScala.map(resultSet => {
+                if (!resultSet.wasApplied())
+                    TelemetryManager.error("Entry is not found in cassandra for content with identifiers: " + identifiers)
+                ResponseHandler.OK()
+            })
+        } catch {
+            case e: Exception =>
+                TelemetryManager.error("Exception Occurred While Deleting The Record. | Exception is : " + e.getMessage, e)
                 throw new ServerException(ErrorCodes.ERR_SYSTEM_EXCEPTION.name, "Exception Occurred While Reading The Record. Exception is : " + e.getMessage)
         }
     }

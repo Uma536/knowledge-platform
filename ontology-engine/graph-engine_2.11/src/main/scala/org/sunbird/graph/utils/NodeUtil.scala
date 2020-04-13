@@ -5,30 +5,33 @@ import java.util
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.module.scala.DefaultScalaModule
 import org.apache.commons.collections4.{CollectionUtils, MapUtils}
-import org.sunbird.common.Platform
+import org.apache.commons.lang3.StringUtils
+import org.sunbird.common.{JsonUtils, Platform}
 import org.sunbird.graph.common.enums.SystemProperties
 import org.sunbird.graph.dac.model.{Node, Relation}
 import org.sunbird.graph.schema.DefinitionNode
 
 import scala.collection.JavaConverters
 import scala.collection.JavaConverters._
+import scala.concurrent.ExecutionContext
 
 object NodeUtil {
     val mapper: ObjectMapper = new ObjectMapper()
     mapper.registerModule(DefaultScalaModule)
 
-    def serialize(node: Node, fields: util.List[String], schemaName: String): util.Map[String, AnyRef] = {
+    def serialize(node: Node, fields: util.List[String], schemaName: String, schemaVersion: String): util.Map[String, AnyRef] = {
         val metadataMap = node.getMetadata
-        metadataMap.put("identifier", node.getIdentifier)
-        if (CollectionUtils.isNotEmpty(fields))
-            metadataMap.keySet.retainAll(fields)
-        val jsonProps = DefinitionNode.fetchJsonProps(node.getGraphId, "1.0", schemaName)
+        val jsonProps = DefinitionNode.fetchJsonProps(node.getGraphId, schemaVersion, schemaName)
         val updatedMetadataMap:util.Map[String, AnyRef] = metadataMap.entrySet().asScala.filter(entry => null != entry.getValue).map((entry: util.Map.Entry[String, AnyRef]) => handleKeyNames(entry, fields) ->  convertJsonProperties(entry, jsonProps)).toMap.asJava
-        val definitionMap = DefinitionNode.getRelationDefinitionMap(node.getGraphId, "1.0", schemaName).asJava
+        val definitionMap = DefinitionNode.getRelationDefinitionMap(node.getGraphId, schemaVersion, schemaName).asJava
         val relMap:util.Map[String, util.List[util.Map[String, AnyRef]]] = getRelationMap(node, updatedMetadataMap, definitionMap)
         var finalMetadata = new util.HashMap[String, AnyRef]()
+        finalMetadata.put("objectType",node.getObjectType)
         finalMetadata.putAll(updatedMetadataMap)
         finalMetadata.putAll(relMap)
+        if (CollectionUtils.isNotEmpty(fields))
+            finalMetadata.keySet.retainAll(fields)
+        finalMetadata.put("identifier", node.getIdentifier)
         finalMetadata.put("languageCode", getLanguageCodes(node))
         finalMetadata
     }
@@ -42,6 +45,13 @@ object NodeUtil {
                 nodeMap.get(entry._1).asInstanceOf[util.List[util.Map[String, AnyRef]]].asScala.map(relMap => {
                     if("in".equalsIgnoreCase(entry._2.asInstanceOf[util.Map[String, AnyRef]].get("direction").asInstanceOf[String])) {
                         val rel:Relation = new Relation(relMap.get("identifier").asInstanceOf[String], entry._2.asInstanceOf[util.Map[String, AnyRef]].get("type").asInstanceOf[String], node.getIdentifier)
+                        rel.setStartNodeObjectType(relMap.get("objectType").asInstanceOf[String])
+                        rel.setEndNodeObjectType(node.getObjectType)
+                        rel.setStartNodeName(relMap.get("name").asInstanceOf[String])
+                        rel.setStartNodeMetadata(new util.HashMap[String, AnyRef](){{
+                            put("description", relMap.get("description"))
+                            put("status", relMap.get("status"))
+                        }})
                         if(null != relMap.get("index") && 0 < relMap.get("index").asInstanceOf[Integer]){
                             rel.setMetadata(new util.HashMap[String, AnyRef](){{
                                 put(SystemProperties.IL_SEQUENCE_INDEX.name(), relMap.get("index"))
@@ -50,6 +60,13 @@ object NodeUtil {
                         inRelations.add(rel)
                     } else {
                         val rel:Relation = new Relation(node.getIdentifier, entry._2.asInstanceOf[util.Map[String, AnyRef]].get("type").asInstanceOf[String], relMap.get("identifier").asInstanceOf[String])
+                        rel.setStartNodeObjectType(node.getObjectType)
+                        rel.setEndNodeObjectType(relMap.get("objectType").asInstanceOf[String])
+                        rel.setEndNodeName(relMap.get("name").asInstanceOf[String])
+                        rel.setEndNodeMetadata(new util.HashMap[String, AnyRef]() {{
+                            put("description", relMap.get("description"))
+                            put("status", relMap.get("status"))
+                        }})
                         if(null != relMap.get("index") && 0 < relMap.get("index").asInstanceOf[Integer]){
                             rel.setMetadata(new util.HashMap[String, AnyRef](){{
                                 put(SystemProperties.IL_SEQUENCE_INDEX.name(), relMap.get("index"))
@@ -83,7 +100,7 @@ object NodeUtil {
 
     def handleKeyNames(entry: util.Map.Entry[String, AnyRef], fields: util.List[String]) = {
         if(CollectionUtils.isEmpty(fields)) {
-            entry.getKey.substring(0,1) + entry.getKey.substring(1)
+            entry.getKey.substring(0,1).toLowerCase + entry.getKey.substring(1)
         } else {
             entry.getKey
         }
@@ -98,7 +115,7 @@ object NodeUtil {
             if (relMap.containsKey(relationMap.get(relKey))) relMap.get(relationMap.get(relKey)).add(populateRelationMaps(rel, "in"))
             else {
                 if(null != relationMap.get(relKey)) {
-                    relMap.put(relationMap.get(relKey).asInstanceOf[String], new util.ArrayList[util.Map[String, AnyRef]]() {})
+                    relMap.put(relationMap.get(relKey).asInstanceOf[String], new util.ArrayList[util.Map[String, AnyRef]]() {add(populateRelationMaps(rel, "in"))})
                 }
             }
         }
@@ -107,7 +124,7 @@ object NodeUtil {
             if (relMap.containsKey(relationMap.get(relKey))) relMap.get(relationMap.get(relKey)).add(populateRelationMaps(rel, "out"))
             else {
                 if(null != relationMap.get(relKey)) {
-                    relMap.put(relationMap.get(relKey).asInstanceOf[String], new util.ArrayList[util.Map[String, AnyRef]]() {})
+                    relMap.put(relationMap.get(relKey).asInstanceOf[String], new util.ArrayList[util.Map[String, AnyRef]]() {add(populateRelationMaps(rel, "out"))})
                 }
             }
         }
@@ -116,7 +133,7 @@ object NodeUtil {
     
     def convertJsonProperties(entry: util.Map.Entry[String, AnyRef], jsonProps: scala.List[String]) = {
         if(jsonProps.contains(entry.getKey)) {
-            try {mapper.readTree(entry.getValue.toString)}
+            try {JsonUtils.deserialize(entry.getValue.asInstanceOf[String], classOf[Object])} //.readTree(entry.getValue.toString)}
             catch { case e: Exception => entry.getValue }
         }
         else entry.getValue
@@ -144,17 +161,20 @@ object NodeUtil {
     }
 
     def getLanguageCodes(node: Node): util.List[String] = {
-        val languages:util.List[String] = {
-            if (node.getMetadata.get("language").isInstanceOf[String]) util.Arrays.asList(node.getMetadata.get("language").asInstanceOf[String])
-            else if (node.getMetadata.get("language").isInstanceOf[util.List[String]]) node.getMetadata.get("language").asInstanceOf[util.List[String]]
-            else new util.ArrayList[String]()
+        val value = node.getMetadata.get("language")
+        val languages:util.List[String] = value match {
+            case value: String => List(value).asJava
+            case value: util.List[String] => value
+            case value: Array[String] => value.filter((lng: String) => StringUtils.isNotBlank(lng)).toList.asJava
+            case _ => new util.ArrayList[String]()
         }
         if(CollectionUtils.isNotEmpty(languages)){
-            JavaConverters.bufferAsJavaListConverter(languages.asScala.map(lang => if(Platform.config.hasPath("languageCode" + lang.toLowerCase)) Platform.config.getString("languageCode" + lang.toLowerCase) else "")).asJava
+            JavaConverters.bufferAsJavaListConverter(languages.asScala.map(lang => if(Platform.config.hasPath("languageCode." + lang.toLowerCase)) Platform.config.getString("languageCode." + lang.toLowerCase) else "")).asJava
         }else{
             languages
         }
     }
 
+    def isRetired(node: Node): Boolean = StringUtils.equalsIgnoreCase(node.getMetadata.get("status").asInstanceOf[String], "Retired")
 
 }
